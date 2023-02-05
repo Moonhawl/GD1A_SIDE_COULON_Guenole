@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><title>Mon 1er jeu Phaser</title>
+<script
+src="//cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
+<style type="text/css"> body { margin: 0; }</style>
+</head>
+<body>
+<script type="text/javascript">
+
+var config = 
+{
+    type: Phaser.AUTO,
+    width: 800, height: 600,
+    physics:
+    {
+
+        default: 'arcade',
+        arcade: 
+            {
+                gravity: { y: 800 },
+                debug: false
+            }
+    },
+    input:{gamepad:true},
+    scene: {preload: preload, create: create, update: update }
+};
+new Phaser.Game(config);
+
+//==========================================================================
+//                            FONCTION PRELOAD
+//==========================================================================
+
+function preload()
+{
+
+    // Chargement des tuiles de jeu
+    this.load.image('coin', 'assets/coin.png');
+    this.load.image("tileset", "assets/tileset.png");
+    this.load.image("background", "assets/background.png");
+
+    //Chargement de la carte
+    this.load.tilemapTiledJSON("map", "assets/level.json");
+
+    //Chargement du personnage
+    this.load.spritesheet('chara','assets/chara.png',
+    { frameWidth: 64, frameHeight: 64 });
+
+    //Chargement de l'ennemi
+    this.load.spritesheet('thorns','assets/ronces_maudites.png',
+    { frameWidth: 64, frameHeight: 64 });
+
+    //Chargement de l'UI
+    this.load.spritesheet('hearts','assets/hearts.png',
+                { frameWidth: 64, frameHeight: 64 });
+}
+
+const THORNS_X = 430
+const THORNS_Y = 625
+
+var platformes;
+var player;
+var game_over = false;
+var controller = false;
+var cursors;
+var xspeed = 160;
+var yspeed = 310;
+var starts;
+var can_jump = true;
+var can_wall_jump = true;
+var input_locked = false;
+var score=0;
+var scoreText;
+var bombs;
+var gameOver = false;
+var hp =5;
+var can_get_hit = true;
+var physics;
+
+function lock_input()
+{
+    input_locked = false;
+}
+
+function cd_wall_jump()
+{
+    can_wall_jump = true;
+}
+
+function wall_jump(side)
+{
+    if (side == "left")
+        x = -1;
+    else if (side == "right")
+        x = 1;
+
+    can_wall_jump = false;
+    input_locked = true;
+    setTimeout(cd_wall_jump, 250);
+    setTimeout(lock_input, 100);
+    player.setVelocityY(-yspeed);
+    player.setVelocityX(xspeed * x);
+}
+
+function cd_can_get_hit()
+{
+    player.can_get_hit = true;
+    thorns.can_get_hit = true;
+    if (!game_over)
+        player.setTint(0xffffff);
+}
+
+function kill_player()
+{
+    this.physics.pause();
+    player.setTint(0xff0000);
+    player.anims.play('turn');
+    game_over = true;
+}
+
+
+//==========================================================================
+//                            FONCTION CREATE
+//==========================================================================
+
+function create (){
+
+    physics = this.physics;
+
+    this.add.image(800,800, 'background');
+
+    // ======= Activation de la manette ======= //
+    this.input.gamepad.once('connected', function (pad) {
+        controller = pad;
+    });
+
+
+    // ===== Chargement de la carte ===== //
+    const carteDuNiveau = this.add.tilemap("map");
+
+    // ===== Chargement des Tilesets ===== //
+    const tileset = carteDuNiveau.addTilesetImage(
+          "tileset",
+          "tileset"
+    );
+
+    const plateformes = carteDuNiveau.createLayer(
+      "plateforms",
+      tileset
+    );
+
+    const spikes = carteDuNiveau.createLayer(
+      "spikes",
+      tileset
+    );
+
+
+    // ======= Mise en place de la physique ======== //
+    player = this.physics.add.sprite(70, 200, 'hero').setSize(26,55).setOffset(17, 9);
+    
+    thorns = physics.add.sprite(430, 609, 'thorns').setSize(50,50).setOffset(10, 9);
+    thorns.body.allowGravity = false;
+    thorns.setVelocityX(-100);
+    thorns.alive = true;
+    thorns.can_get_hit = true;
+
+    
+
+    hearts = physics.add.sprite(50, 50, 'hearts');
+    hearts.body.allowGravity = false;
+    hearts.setScrollFactor(0,0);
+
+    plateformes.setCollisionByProperty({ isSolid: true });
+    this.physics.add.collider(player, plateformes);
+
+    spikes.setCollisionByProperty({ isSpike: true });
+    this.physics.add.collider(player, spikes, damage_player, null, this);
+
+    player.setCollideWorldBounds(true);
+    physics.add.overlap(player, thorns, hit_thorns, null, this);
+    // ======= Animations du joueur ======= //
+    this.anims.create({
+        key: 'left',
+        frames: this.anims.generateFrameNumbers('chara', {start:8,end:15}),
+        frameRate: 15,
+        repeat: -1
+    });
+    this.anims.create({
+        key: 'turn',
+        frames: this.anims.generateFrameNumbers('chara', {start:16,end:21}),
+        frameRate: 9,
+        repeat: -1
+    });
+    
+
+    this.anims.create({
+        key: 'right',
+        frames: this.anims.generateFrameNumbers('chara', {start:0,end:7}),
+        frameRate: 15,
+        repeat: -1
+    });
+  
+    // ======= Animation des ennemis ======= //
+    this.anims.create({
+        key: 'crawl',
+        frames: this.anims.generateFrameNumbers('thorns', {start:0,end:6}),
+        frameRate: 10,
+        repeat: -1
+    });
+    thorns.anims.play('crawl', true);
+
+    // ======= Affichage des coeurs ======= //
+    this.anims.create({
+        key: '5hp',
+        frames: [ { key: 'hearts', frame: 0 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    this.anims.create({
+        key: '4hp',
+        frames: [ { key: 'hearts', frame: 1 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    this.anims.create({
+        key: '3hp',
+        frames: [ { key: 'hearts', frame: 2 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    this.anims.create({
+        key: '2hp',
+        frames: [ { key: 'hearts', frame: 3 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    this.anims.create({
+        key: '1hp',
+        frames: [ { key: 'hearts', frame: 4 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    this.anims.create({
+        key: '0hp',
+        frames: [ { key: 'hearts', frame: 5 } ],
+        frameRate: 1,
+        repeat: 0
+    });
+    hearts.anims.play('5hp', true);
+  
+
+    cursors = this.input.keyboard.createCursorKeys();
+
+
+
+    this.physics.world.setBounds(0, 0, 1600, 1600);
+    this.cameras.main.setBounds(0, 0, 1600, 1600);
+    this.cameras.main.startFollow(player);
+    
+}
+
+//==========================================================================
+//                            FONCTION UPDATE
+//==========================================================================
+
+function update(){
+
+    if (gameOver){return;}
+
+
+    if (cursors.left.isDown || controller.left){ //si la touche gauche est appuyée
+        player.setVelocityX(-xspeed); //alors vitesse négative en X
+        player.anims.play('left', true); //et animation => gauche
+    }
+    else if (cursors.right.isDown || controller.right){ //sinon si la touche droite est appuyée
+        player.setVelocityX(xspeed); //alors vitesse positive en X
+        player.anims.play('right', true); //et animation => droite
+    }
+    else{ // sinon
+        player.setVelocityX(0); //vitesse nulle
+        player.anims.play('turn', true); //animation fait face caméra
+    }
+    if (can_jump && (cursors.up.isDown || controller.A)){
+        //si touche haut appuyée ET que le perso touche le sol
+        can_jump = false
+        player.setVelocityY(-yspeed); //alors vitesse verticale négative
+        //(on saute)
+    }
+    
+    if (player.body.blocked.down)
+        can_jump = true; 
+
+    if (can_wall_jump && (cursors.up.isDown || controller.A) && player.body.blocked.right)
+        wall_jump("left");
+
+    if (can_wall_jump && (cursors.up.isDown || controller.A) && player.body.blocked.left)
+        wall_jump("right");
+    
+        
+    if (thorns.x > THORNS_X + 160)
+        thorns.setVelocityX(-200);
+    if (thorns.x < THORNS_X)
+        thorns.setVelocityX(100);    
+}
+
+function damage_player()
+{
+    if (can_get_hit = true)
+    {
+        can_get_hit = false;
+        player.setTint(0xff0000);
+        hp -= 1;
+        if (hp <= 0)
+            kill_player();
+        setTimeout(cd_can_get_hit, 1000)
+    }
+
+    switch (hp)
+    {
+        case 5:
+            hearts.anims.play('5hp', true);
+            break;
+        case 4:
+            hearts.anims.play('4hp', true);
+            break;
+        case 3:
+            hearts.anims.play('3hp', true);
+            break;
+        case 2:
+            hearts.anims.play('2hp', true);
+            break;
+        case 1:
+            hearts.anims.play('1hp', true);
+            break;
+        case 0:
+            hearts.anims.play('0hp', true);
+            break;
+    }
+}
+
+function hit_thorns()
+{
+    if (player.x < thorns.x && thorns.alive && thorns.can_get_hit)
+    {
+        thorns.alive = false;
+
+        thorns.setTint(0xff0000);
+        this.tweens.add({
+            targets: thorns,
+            alpha: 0,
+            duration: 2000,
+            ease: 'attack'
+        }, this);
+    }
+    else if (thorns.alive)
+    {
+        damage_player();
+    }
+}
+
+
+
+</script>
+</body>
+</html>
